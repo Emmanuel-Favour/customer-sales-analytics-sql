@@ -1,0 +1,73 @@
+WITH
+sales_number AS (
+SELECT
+"FORMAT_DATE('%Y-%m', DATE_TRUNC(CAST(salesorderheader.OrderDate AS DATE), MONTH)) AS order_month,"
+"salesterritory.CountryRegionCode AS country_region_code,"
+"salesterritory.Name AS country,"
+"salesterritory.TerritoryID AS TerritoryID,"
+"COUNT(salesorderheader.SalesOrderID) AS number_orders,"
+"COUNT(DISTINCT salesorderheader.CustomerID) AS number_customers,"
+"COUNT(DISTINCT salesorderheader.SalesPersonID) AS no_salesPersons,"
+CAST(SUM(salesorderheader.TotalDue) AS INT64) AS total_with_tax
+FROM
+`tc-da-1.adwentureworks_db.salesorderheader` salesorderheader
+JOIN
+`tc-da-1.adwentureworks_db.salesterritory` salesterritory
+ON
+salesterritory.TerritoryID = salesorderheader.TerritoryID
+GROUP BY
+"order_month,"
+"country_region_code,"
+"country,"
+"TerritoryID ),"
+tax_info AS (
+SELECT
+"stateprovince.StateProvinceID,"
+"stateprovince.CountryRegionCode,"
+MAX(salestaxrate.TaxRate) AS max_tax_rate
+FROM
+`tc-da-1.adwentureworks_db.salestaxrate` salestaxrate
+JOIN
+`tc-da-1.adwentureworks_db.stateprovince` stateprovince
+ON
+stateprovince.StateProvinceID = salestaxrate.StateProvinceID
+GROUP BY
+"stateprovince.CountryRegionCode,"
+"stateprovince.StateProvinceID ),"
+total_provinces AS (
+SELECT
+"stateprovince.CountryRegionCode,"
+COUNT(DISTINCT stateprovince.StateProvinceID) AS total_provinces
+FROM
+`tc-da-1.adwentureworks_db.stateprovince` stateprovince
+GROUP BY
+"stateprovince.CountryRegionCode ),"
+country_tax_info AS (
+SELECT
+"tax_info.CountryRegionCode,"
+"AVG(tax_info.max_tax_rate) AS mean_tax_rate,"
+"COUNT(tax_info.StateProvinceID) AS provinces_with_tax,"
+total_province.total_provinces
+FROM
+tax_info tax_info
+JOIN
+total_provinces total_province
+ON
+tax_info.CountryRegionCode = total_province.CountryRegionCode
+GROUP BY
+"tax_info.CountryRegionCode,"
+total_province.total_provinces )
+SELECT
+"sales_number.*,"
+"SUM(total_with_tax) OVER (ORDER BY total_with_tax DESC) AS cumulative_sum,"
+"RANK() OVER(PARTITION BY country ORDER BY total_with_tax DESC) AS country_sales_rank,"
+"ROUND(country_tax_info.mean_tax_rate, 1) mean_tax_rate,"
+"ROUND(country_tax_info.provinces_with_tax / NULLIF(country_tax_info.total_provinces, 0), 2) AS perc_provinces_w_tax"
+FROM
+sales_number sales_number
+JOIN
+country_tax_info country_tax_info
+ON
+sales_number.country_region_code = country_tax_info.CountryRegionCode
+WHERE
+sales_number.country_region_code = 'US';
